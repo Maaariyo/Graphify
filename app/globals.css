@@ -1,0 +1,159 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+@theme {
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-paper: #f7f6f3;
+  --color-ink: #1f2328;
+  --color-muted: #6b7075;
+  --color-line: #e7e5e0;
+  --color-accent: #0c8599;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--font-sans);
+  overscroll-behavior-y: none;
+}
+
+/* Leaflet: keep its controls inside our look */
+.leaflet-container {
+  font-family: var(--font-sans);
+  background: #eceae4;
+}
+.leaflet-control-attribution {
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.7) !important;
+}
+.leaflet-control-zoom a {
+  color: var(--color-ink) !important;
+}
+
+/* Category markers */
+.wl-marker {
+  background: none;
+  border: none;
+}
+.wl-pin {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: #fff;
+  border: 2px solid var(--c);
+  color: var(--c);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 10px rgba(31, 35, 40, 0.18);
+  transition: transform 0.15s ease;
+}
+.wl-pin::after {
+  content: "";
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border-right: 2px solid var(--c);
+  border-bottom: 2px solid var(--c);
+  transform: translateX(-50%) rotate(45deg);
+}
+.wl-pin svg {
+  position: relative;
+  z-index: 1;
+}
+.wl-pin.is-selected {
+  background: var(--c);
+  color: #fff;
+  transform: scale(1.18) translateY(-3px);
+}
+.wl-pin.is-selected::after {
+  background: var(--c);
+}
+.wl-pin .wl-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 2;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  color: #fff;
+  border: 1.5px solid #fff;
+}
+.wl-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: #fff;
+  border: 2px solid var(--c);
+  color: var(--c);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px rgba(31, 35, 40, 0.2);
+}
+.wl-here {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #1c7ed6;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 6px rgba(28, 126, 214, 0.2);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+@keyframes wl-sheet-up {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes wl-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-sheet {
+  animation: wl-sheet-up 0.22s ease-out;
+}
+.animate-fade {
+  animation: wl-fade 0.18s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-sheet,
+  .animate-fade,
+  .wl-pin {
+    animation: none;
+    transition: none;
+  }
+}
