@@ -123,27 +123,88 @@ function photonToResult(f: PhotonFeature): GeocodeResult {
   return { name, label, area, lat, lng };
 }
 
+/** fetch() that gives up after `ms`, while still honouring the caller's own abort. */
+async function fetchJson<T>(url: string, signal: AbortSignal | undefined, ms = 4000): Promise<T> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  const onAbort = () => ctrl.abort();
+  signal?.addEventListener("abort", onAbort);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+interface NominatimPlace {
+  lat: string;
+  lon: string;
+  name?: string;
+  display_name: string;
+  address?: Record<string, string | undefined>;
+}
+
+function nominatimToResult(p: NominatimPlace): GeocodeResult {
+  const a = p.address ?? {};
+  const area = a.suburb || a.neighbourhood || a.city_district || a.city || a.town || a.county || a.state || null;
+  return {
+    name: p.name || p.display_name.split(",")[0],
+    label: p.display_name.split(",").slice(1, 4).join(",").trim(),
+    area,
+    lat: parseFloat(p.lat),
+    lng: parseFloat(p.lon),
+  };
+}
+
 /**
- * Place search via Photon (OpenStreetMap data, free, no API key).
+ * Place search. Photon (OpenStreetMap data, free, no key) is the main source and is built for type-ahead.
+ * If it is down, slow or finds nothing, Nominatim (OpenStreetMap's own geocoder) is tried instead.
  * Results are biased towards `near` so "Blue Tokai" finds the Delhi one first.
  */
 export async function searchLocations(query: string, near?: LatLng, signal?: AbortSignal): Promise<GeocodeResult[]> {
-  const params = new URLSearchParams({ q: query, limit: "6", lang: "en" });
+  const photon = new URLSearchParams({ q: query, limit: "6", lang: "en" });
   if (near) {
-    params.set("lat", String(near.lat));
-    params.set("lon", String(near.lng));
+    photon.set("lat", String(near.lat));
+    photon.set("lon", String(near.lng));
   }
-  const res = await fetch(`https://photon.komoot.io/api/?${params}`, { signal });
-  if (!res.ok) throw new Error(`Location search failed (${res.status})`);
-  const json = (await res.json()) as { features: PhotonFeature[] };
-  return json.features.map(photonToResult);
+  try {
+    const json = await fetchJson<{ features: PhotonFeature[] }>(`https://photon.komoot.io/api/?${photon}`, signal);
+    if (json.features.length) return json.features.map(photonToResult);
+  } catch (e) {
+    if (signal?.aborted) throw e;
+  }
+  const nominatim = new URLSearchParams({ q: query, format: "jsonv2", addressdetails: "1", limit: "6", "accept-language": "en" });
+  if (near) {
+    // Prefer results within ~50 km without excluding the rest.
+    nominatim.set("viewbox", [near.lng - 0.5, near.lat + 0.5, near.lng + 0.5, near.lat - 0.5].join(","));
+  }
+  const places = await fetchJson<NominatimPlace[]>(`https://nominatim.openstreetmap.org/search?${nominatim}`, signal, 6000);
+  return places.map(nominatimToResult);
 }
 
 export async function reverseGeocode(at: LatLng, signal?: AbortSignal): Promise<GeocodeResult | null> {
-  const res = await fetch(`https://photon.komoot.io/reverse?lat=${at.lat}&lon=${at.lng}&lang=en`, { signal });
-  if (!res.ok) return null;
-  const json = (await res.json()) as { features: PhotonFeature[] };
-  return json.features[0] ? photonToResult(json.features[0]) : null;
+  try {
+    const json = await fetchJson<{ features: PhotonFeature[] }>(
+      `https://photon.komoot.io/reverse?lat=${at.lat}&lon=${at.lng}&lang=en`,
+      signal,
+    );
+    if (json.features[0]) return photonToResult(json.features[0]);
+  } catch (e) {
+    if (signal?.aborted) throw e;
+  }
+  try {
+    const p = await fetchJson<NominatimPlace>(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&addressdetails=1&accept-language=en&lat=${at.lat}&lon=${at.lng}`,
+      signal,
+      6000,
+    );
+    return p?.display_name ? nominatimToResult(p) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function getCurrentPosition(): Promise<LatLng> {

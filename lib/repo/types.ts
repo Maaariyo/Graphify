@@ -12,12 +12,12 @@ export type AuthState =
 export interface Repo {
   readonly mode: "demo" | "supabase";
   getAuth(): Promise<AuthState>;
-  /** Demo: `who` is a member id. Supabase: `who` is an email; a code + link is emailed. */
-  signIn(who: string): Promise<void>;
-  /** Supabase only: the 6-digit code from the sign-in email. Works inside an installed iPhone app, where links don't. */
-  verifyCode?(email: string, code: string): Promise<void>;
-  /** Supabase only, when Google is enabled in the Supabase dashboard. */
-  signInWithGoogle?(): Promise<void>;
+  /** Demo: `who` is a member id. Supabase: email + password (no email is ever sent). */
+  signIn(who: string, password?: string): Promise<void>;
+  /** Supabase only: who an invite link is for, before they set a password. */
+  checkInvite?(token: string): Promise<{ email: string; existing: boolean; name: string | null }>;
+  /** Supabase only: redeem an invite link (new account, or password reset) and sign in. */
+  join?(token: string, password: string, name: string): Promise<void>;
   signOut(): Promise<void>;
   onAuthChange(cb: () => void): () => void;
 
@@ -36,6 +36,7 @@ export interface Repo {
   setPlanPlaces(planId: string, placeIds: string[]): Promise<void>;
 
   updateMyName(name: string): Promise<void>;
-  invite(email: string, role: Role): Promise<void>;
+  /** Returns the join link to send (Supabase), or null in demo mode where invites join instantly. */
+  invite(email: string, role: Role): Promise<string | null>;
   uninvite(email: string): Promise<void>;
 }

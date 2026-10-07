@@ -7,7 +7,7 @@ A private shared map where a group of friends saves places to explore, organised
 - **Plan**: pick a date and a vibe, add matching saved places, reorder them, share to WhatsApp or open the route in Google Maps.
 - **Friends**: who added what, what each person has visited, and invites (admins only).
 
-Built with Next.js, Tailwind, Supabase (database + login) and Leaflet with OpenStreetMap/CARTO tiles. There are no paid APIs and no map API key.
+Built with Next.js, Tailwind, Supabase (database + login) and Leaflet with OpenStreetMap/CARTO tiles. There are no paid APIs, no map API key and no email service.
 
 ---
 
@@ -24,32 +24,32 @@ Open http://localhost:3000 and pick a person. With no database connected, the ap
 
 ## 2. Connect a real shared database (Supabase, free tier)
 
+No email service is needed. People join through a one-time link you send them on WhatsApp, then sign in with email + password.
+
 1. Create a project at [supabase.com](https://supabase.com). Choose the **Mumbai (ap-south-1)** region.
 2. Go to **SQL Editor → New query**, paste all of [`supabase/schema.sql`](supabase/schema.sql) and press **Run**.
-3. In the same editor, add yourself as the first admin (use your real email):
+3. In **Authentication → Sign In / Providers**, keep **Email** enabled and turn **off** "Allow new users to sign up". Accounts are only ever created from invite links, so nobody can register on their own.
+4. Go to **Project Settings → API** and copy three values: **Project URL**, the **anon public** key, and the **service_role** key (secret).
+5. Copy `.env.example` to `.env.local` and paste all three in.
+6. Make yourself the first admin. In the SQL editor, run this with your real email:
    ```sql
-   insert into public.invites (email, role) values ('you@gmail.com', 'admin');
+   select public.issue_invite_token('you@gmail.com', 'admin');
    ```
-4. Go to **Project Settings → API** and copy the **Project URL** and the **anon public** key.
-5. Copy `.env.example` to `.env.local` and paste both values in.
-6. Run `npm run dev` again. You'll now see the email sign-in screen instead of demo mode.
-
-### Login email: do not skip this
-
-- **Supabase's built-in email only delivers to members of your Supabase team.** Your friends won't get a sign-in email until you add your own email sender. The simplest is [Resend](https://resend.com) (free tier). Create an API key there, then in Supabase go to **Authentication → Emails → SMTP Settings**, enable custom SMTP, and enter host `smtp.resend.com`, port `465`, user `resend`, and your API key as the password.
-- **Show the 6-digit code in the email.** In **Authentication → Emails → Templates**, add `Your code: {{ .Token }}` to the body of both **Magic Link** and **Confirm signup** (a friend's first sign-in uses the second one). On iPhone, a link in an email opens in Safari, not in the installed home-screen app, so friends need to type the code instead.
-- **Optional: Google sign-in** (one tap, no email). Enable Google under **Authentication → Providers** (this needs a Google Cloud OAuth client). Then set `NEXT_PUBLIC_GOOGLE_AUTH=true`.
+   It returns a long code. Run `npm run dev`, open `http://localhost:3000/join#<that code>`, and choose your name and password.
 
 ## 3. Put it online (Vercel, free)
 
 1. Push this repo to GitHub, then import it at [vercel.com/new](https://vercel.com/new).
-2. Add the same environment variables from `.env.local` in the Vercel project settings.
-3. After the first deploy, go to Supabase **Authentication → URL Configuration**. Set **Site URL** to your Vercel URL, and add it plus `http://localhost:3000` to **Redirect URLs**.
-4. Send friends the link. On a phone, use **Share → Add to Home Screen** and it opens like an app.
+2. Add the three environment variables from `.env.local` in the Vercel project settings. The service-role key must **not** start with `NEXT_PUBLIC_`.
+3. Open the Vercel URL and sign in.
 
 ## 4. Invite friends
 
-Open **Friends** in the app (as an admin), type their email and press **Invite**. They sign in with that exact email. Removing an invite cuts off their access immediately.
+In the app, go to **Friends → Admin · Invites**, type their email and press **Invite**. You get a link with a **WhatsApp** button. It works once and expires in 7 days. They open it, pick a name and password, and they're in.
+
+- **On iPhone:** after joining, tap **Share → Add to Home Screen**, then sign in once inside the home-screen app with the same email and password.
+- **Forgot password:** tap the 🔑 next to their email to send a reset link. The same link flow sets a new password.
+- **Remove someone:** tap ✕. Their access stops immediately.
 
 ---
 
@@ -58,9 +58,12 @@ Open **Friends** in the app (as an admin), type their email and press **Invite**
 ```
 app/                    Screens: map (page.tsx), places/, plan/, friends/
 app/api/resolve-link/   Expands Google Maps short links (maps.app.goo.gl) into coordinates
+app/api/join/           Redeems an invite link: creates the account or resets the password (server-only key)
+app/join/               The page an invite link opens
 components/             MapView, PlaceForm (add/edit), PlaceDetail, FilterSheet, AppShell
 lib/repo/               Data layer: supabase.ts (real) and local.ts (demo), same interface
 lib/filters.ts          Search / filter / sort logic
+lib/dedupe.ts           "Is this already on the map?" matching (same link, same spot, similar name)
 lib/categories.ts       The 8 categories: icon, colour, label. Edit here to change them
 supabase/schema.sql     Tables, access rules (row-level security), realtime
 docs/PRODUCT_SPEC.md    What was built, what changed from the original brief, and why
@@ -78,7 +81,7 @@ docs/PRODUCT_SPEC.md    What was built, what changed from the original brief, an
 | Delete a plan | | ✓ (creator) | ✓ |
 | Invite or remove people | | | ✓ |
 
-Anyone not on the invite list can sign in but sees nothing.
+Accounts exist only for invited emails (sign-ups are off). Someone removed from the invite list can still log in but sees nothing.
 
 ### Changing categories
 

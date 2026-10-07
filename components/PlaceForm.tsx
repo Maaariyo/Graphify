@@ -3,10 +3,10 @@
 import { Crosshair, Link2, LoaderCircle, LocateFixed, MapPin, Search, TriangleAlert } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CATEGORIES, STATUSES } from "@/lib/categories";
+import { CATEGORIES, STATUS_BY_ID, STATUSES } from "@/lib/categories";
+import { findDuplicates } from "@/lib/dedupe";
 import {
   DEFAULT_CENTER,
-  distanceKm,
   getCurrentPosition,
   isGoogleMapsShortLink,
   isGoogleMapsUrl,
@@ -20,7 +20,7 @@ import {
 import { useStore } from "@/lib/store";
 import type { CategoryId, PlaceInput, Status } from "@/lib/types";
 import { Sheet } from "./Sheet";
-import { Button, cx, SectionLabel } from "./ui";
+import { Button, CategoryIcon, cx, SectionLabel } from "./ui";
 
 const PickerMap = dynamic(() => import("./PickerMap"), {
   ssr: false,
@@ -50,7 +50,7 @@ export function PlaceFormSheet() {
 }
 
 function PlaceForm() {
-  const { editor, setEditor, views, run, select, here, toast } = useStore();
+  const { editor, setEditor, views, run, select, here } = useStore();
   const editing = editor?.mode === "edit" ? views.find((v) => v.id === editor.id) : undefined;
   const initial = editor?.mode === "add" ? editor.initial : undefined;
 
@@ -191,22 +191,27 @@ function PlaceForm() {
   }
 
   // Someone in the group probably already added this.
-  const duplicate = useMemo(() => {
-    if (!d.at) return null;
-    const name = d.name.trim().toLowerCase();
-    return (
-      views.find(
-        (v) =>
-          v.id !== editing?.id &&
-          (distanceKm(v, d.at!) < 0.08 || (name.length > 3 && v.name.toLowerCase() === name && distanceKm(v, d.at!) < 3)),
-      ) ?? null
-    );
-  }, [d.at, d.name, views, editing?.id]);
+  const duplicates = useMemo(
+    () => findDuplicates(views, { name: d.name, at: d.at, source_url: d.source_url }, editing?.id).slice(0, 2),
+    [d.name, d.at, d.source_url, views, editing?.id],
+  );
+  // Adding over a match needs an explicit "it's a different place"; resets when the match changes.
+  const [confirmedNew, setConfirmedNew] = useState<string | null>(null);
+  const dupKey = duplicates.map((m) => m.place.id).join(",");
+  const blockedByDuplicate = !editing && duplicates.length > 0 && confirmedNew !== dupKey;
+
+  async function saveExisting(placeId: string) {
+    const ok = await run((r) => r.setStatus(placeId, d.status).then(() => true), "Saved to your list");
+    if (ok) {
+      setEditor(null);
+      select(placeId);
+    }
+  }
 
   const missing = !d.name.trim() ? "Add a name" : !d.at ? "Set a location" : !d.category ? "Pick a category" : null;
 
   async function save() {
-    if (missing || !d.at || !d.category) return;
+    if (missing || !d.at || !d.category || blockedByDuplicate) return;
     setSaving(true);
     const input: PlaceInput = {
       name: d.name.trim(),
@@ -314,23 +319,46 @@ function PlaceForm() {
             </div>
           </div>
         )}
-        {duplicate && (
-          <div className="mt-2 flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
-            <TriangleAlert size={16} className="mt-0.5 shrink-0" />
-            <div className="flex-1">
-              <b>{duplicate.name}</b> is already on the map{duplicate.addedBy ? ` (added by ${duplicate.addedBy.name})` : ""}.
+        {duplicates.length > 0 && (
+          <div className="mt-2 space-y-2 rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-950">
+            <div className="flex items-center gap-2 font-bold">
+              <TriangleAlert size={16} className="shrink-0" />
+              {editing ? "Looks like another saved place" : "Already on the map?"}
             </div>
-            <button
-              type="button"
-              className="shrink-0 font-semibold underline"
-              onClick={() => {
-                setEditor(null);
-                select(duplicate.id);
-                if (!duplicate.mine) toast("Tap a status to save it to your list");
-              }}
-            >
-              Open it
-            </button>
+            {duplicates.map(({ place, reason }) => (
+              <div key={place.id} className="flex items-center gap-2.5 rounded-lg bg-white px-2.5 py-2">
+                <CategoryIcon id={place.category} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-semibold">{place.name}</div>
+                  <div className="truncate text-xs text-muted">
+                    {reason}
+                    {place.addedBy && ` · added by ${place.addedBy.name}`}
+                    {place.savers.length > 1 && ` · ${place.savers.length} saved`}
+                  </div>
+                </div>
+                {!editing && !place.mine ? (
+                  <Button className="shrink-0 px-3 py-1.5 text-xs" onClick={() => saveExisting(place.id)}>
+                    Save this
+                  </Button>
+                ) : (
+                  <button
+                    type="button"
+                    className="shrink-0 text-xs font-semibold underline"
+                    onClick={() => {
+                      setEditor(null);
+                      select(place.id);
+                    }}
+                  >
+                    {place.mine ? "On your list" : "Open"}
+                  </button>
+                )}
+              </div>
+            ))}
+            {!editing && duplicates.some((m) => !m.place.mine) && (
+              <p className="text-xs">
+                &ldquo;Save this&rdquo; adds it to your list as <b>{STATUS_BY_ID[d.status].label}</b> instead of creating a copy.
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -395,9 +423,14 @@ function PlaceForm() {
         />
       </div>
 
-      <Button className="w-full py-3.5 text-base" disabled={!!missing || saving} onClick={save}>
+      {blockedByDuplicate && !missing && (
+        <Button variant="secondary" className="w-full py-3" onClick={() => setConfirmedNew(dupKey)}>
+          It&apos;s a different place. Add it anyway
+        </Button>
+      )}
+      <Button className="w-full py-3.5 text-base" disabled={!!missing || saving || blockedByDuplicate} onClick={save}>
         {saving ? <LoaderCircle size={18} className="animate-spin" /> : null}
-        {missing ?? (editing ? "Save changes" : "Add place")}
+        {missing ?? (editing ? "Save changes" : blockedByDuplicate ? "Check the match above" : "Add place")}
       </Button>
     </div>
   );

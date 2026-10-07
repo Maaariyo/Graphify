@@ -21,7 +21,7 @@ export class SupabaseRepo implements Repo {
 
   constructor(url: string, anonKey: string) {
     this.sb = createClient(url, anonKey, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: "pkce" },
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
     });
   }
 
@@ -54,22 +54,29 @@ export class SupabaseRepo implements Repo {
     return { kind: "signed-in", me: { ...profile, role: invite.role } };
   }
 
-  async signIn(email: string) {
-    const { error } = await this.sb.auth.signInWithOtp({
-      email: email.trim().toLowerCase(),
-      options: { emailRedirectTo: window.location.origin },
+  async signIn(email: string, password = "") {
+    const { error } = await this.sb.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
+    if (error) throw new Error(error.message === "Invalid login credentials" ? "Wrong email or password" : error.message);
+  }
+
+  private async callJoin(body: Record<string, unknown>) {
+    const res = await fetch("/api/join", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
     });
-    if (error) throw new Error(error.message);
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || "Something went wrong");
+    return json;
   }
 
-  async verifyCode(email: string, code: string) {
-    const { error } = await this.sb.auth.verifyOtp({ email: email.trim().toLowerCase(), token: code.trim(), type: "email" });
-    if (error) throw new Error(error.message);
+  async checkInvite(token: string) {
+    return (await this.callJoin({ token, check: true })) as { email: string; existing: boolean; name: string | null };
   }
 
-  async signInWithGoogle() {
-    const { error } = await this.sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
-    if (error) throw new Error(error.message);
+  async join(token: string, password: string, name: string) {
+    const { email } = (await this.callJoin({ token, password, name })) as { email: string };
+    await this.signIn(email, password);
   }
 
   async signOut() {
@@ -186,7 +193,8 @@ export class SupabaseRepo implements Repo {
   }
 
   async invite(email: string, role: Role) {
-    check(await this.sb.from("invites").upsert({ email: email.trim().toLowerCase(), role }));
+    const token = check(await this.sb.rpc("create_invite_link", { p_email: email, p_role: role })) as string;
+    return `${window.location.origin}/join#${token}`;
   }
 
   async uninvite(email: string) {

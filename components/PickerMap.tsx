@@ -4,10 +4,10 @@ import L, { type Marker as LeafletMarker } from "leaflet";
 import { MapPin } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
 import type { LatLng } from "@/lib/geo";
 import type { CategoryId } from "@/lib/types";
-import { categoryIcon, TILE_ATTRIBUTION, TILE_URL } from "./MapView";
+import { BaseTiles, categoryIcon } from "./MapView";
 
 // Before a category is picked, show a plain pin rather than implying one.
 const neutralIcon = L.divIcon({
@@ -51,7 +51,7 @@ export default function PickerMap({
 }) {
   return (
     <MapContainer center={[value.lat, value.lng]} zoom={15} zoomControl={false} className="h-full w-full">
-      <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} maxZoom={19} />
+      <BaseTiles />
       <Marker
         position={[value.lat, value.lng]}
         icon={category ? categoryIcon(category, true) : neutralIcon}

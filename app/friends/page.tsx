@@ -1,8 +1,8 @@
 "use client";
 
-import { LogOut, ShieldCheck, UserPlus, X } from "lucide-react";
+import { Copy, KeyRound, LogOut, MessageCircle, ShieldCheck, UserPlus, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Avatar, Button, CategoryIcon, cx, IconButton, SectionLabel } from "@/components/ui";
+import { Avatar, Button, buttonClass, CategoryIcon, cx, IconButton, SectionLabel } from "@/components/ui";
 import { CATEGORIES, STATUSES } from "@/lib/categories";
 import { useStore } from "@/lib/store";
 import type { Member, Role } from "@/lib/types";
@@ -35,7 +35,7 @@ export default function FriendsPage() {
       <div className="mx-auto max-w-3xl px-4 pt-5 pb-28 md:px-8 md:pt-8 md:pb-10">
         <h1 className="text-2xl font-extrabold md:text-3xl">Friends</h1>
         <p className="text-sm text-muted">
-          {members.length} people · {views.length} places
+          {members.length} {members.length === 1 ? "person" : "people"} · {views.length} places
         </p>
 
         {me && <MyProfile key={me.id} me={me} />}
@@ -157,9 +157,20 @@ function MyProfile({ me }: { me: Member }) {
 }
 
 function AdminPanel({ members }: { members: Member[] }) {
-  const { data, run, me } = useStore();
+  const { data, run, me, repo, toast } = useStore();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("member");
+  const [issued, setIssued] = useState<{ email: string; link: string; reset: boolean } | null>(null);
+
+  async function issue(target: string, targetRole: Role, reset: boolean) {
+    const link = await run((r) => r.invite(target, targetRole), repo.mode === "demo" ? `Added ${target}` : undefined);
+    if (link) setIssued({ email: target.trim().toLowerCase(), link, reset });
+  }
+  const message = issued
+    ? issued.reset
+      ? `Here's a link to reset your Wanderlist password (valid 7 days, works once): ${issued.link}`
+      : `Join our Wanderlist, the group map of places we want to try (link valid 7 days, works once): ${issued.link}`
+    : "";
   const joined = new Set(members.map((m) => m.email));
   const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
@@ -171,7 +182,7 @@ function AdminPanel({ members }: { members: Member[] }) {
         onSubmit={async (e) => {
           e.preventDefault();
           if (!valid) return;
-          await run((r) => r.invite(email, role), `Invited ${email.trim()}`);
+          await issue(email, role, false);
           setEmail("");
         }}
       >
@@ -195,7 +206,49 @@ function AdminPanel({ members }: { members: Member[] }) {
           <UserPlus size={16} /> Invite
         </Button>
       </form>
-      <p className="mt-2 text-xs text-muted">They sign in with this exact email. Removing an invite cuts off access immediately.</p>
+      <p className="mt-2 text-xs text-muted">
+        {repo.mode === "demo"
+          ? "Demo mode: invited people can be picked on the sign-in screen straight away."
+          : "You get a one-time link to send them. No email is sent. Removing someone cuts off access immediately."}
+      </p>
+
+      {issued && (
+        <div className="animate-fade mt-3 rounded-2xl border border-accent/30 bg-accent/5 p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="text-sm">
+              <b>{issued.reset ? "Password reset link" : "Invite link"}</b> for {issued.email}
+              <div className="mt-1 text-xs text-muted">Valid for 7 days and works once. Anyone with it can join as this person, so send it privately.</div>
+            </div>
+            <IconButton label="Dismiss" onClick={() => setIssued(null)}>
+              <X size={16} />
+            </IconButton>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <a
+              href={`https://wa.me/?text=${encodeURIComponent(message)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonClass("primary")}
+            >
+              <MessageCircle size={16} /> WhatsApp
+            </a>
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(message);
+                  toast("Copied");
+                } catch {
+                  toast("Couldn't copy. Long-press the link instead.", "error");
+                }
+              }}
+            >
+              <Copy size={16} /> Copy
+            </Button>
+          </div>
+          <div className="mt-2 truncate text-xs text-muted select-all">{issued.link}</div>
+        </div>
+      )}
 
       <ul className="mt-3 overflow-hidden rounded-2xl border border-line bg-white">
         {(data?.invites ?? []).map((inv) => (
@@ -205,6 +258,14 @@ function AdminPanel({ members }: { members: Member[] }) {
               {joined.has(inv.email) ? "Joined" : "Pending"}
             </span>
             <span className="w-14 text-xs text-muted">{inv.role === "admin" ? "Admin" : "Member"}</span>
+            {repo.mode === "supabase" && (
+              <IconButton
+                label={joined.has(inv.email) ? `Password reset link for ${inv.email}` : `New invite link for ${inv.email}`}
+                onClick={() => issue(inv.email, inv.role, joined.has(inv.email))}
+              >
+                <KeyRound size={16} />
+              </IconButton>
+            )}
             {inv.email !== me?.email ? (
               <IconButton label={`Remove ${inv.email}`} onClick={() => run((r) => r.uninvite(inv.email), "Access removed")}>
                 <X size={16} />

@@ -167,7 +167,7 @@ export class LocalRepo implements Repo {
     this.authListeners.forEach((l) => l());
   }
 
-  async invite(email: string, role: Role) {
+  async invite(email: string, role: Role): Promise<string | null> {
     const s = this.read();
     const e = email.trim().toLowerCase();
     if (!s.invites.some((i) => i.email === e)) s.invites.push({ email: e, role });
@@ -177,6 +177,7 @@ export class LocalRepo implements Repo {
       s.members.push({ id: uid("u"), name, email: e, role, created_at: new Date().toISOString() });
     }
     this.write(s);
+    return null;
   }
 
   async uninvite(email: string) {

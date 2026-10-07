@@ -8,9 +8,43 @@ import { CATEGORY_BY_ID } from "@/lib/categories";
 import { DEFAULT_CENTER, DEFAULT_ZOOM, type LatLng } from "@/lib/geo";
 import type { CategoryId, PlaceView } from "@/lib/types";
 
-export const TILE_URL = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
-export const TILE_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
+const OSM_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+
+/** Free tile servers, best-looking first. If one fails, the map switches to the next for the rest of the session. */
+const TILE_PROVIDERS = [
+  {
+    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    attribution: `${OSM_ATTRIBUTION} &copy; <a href="https://carto.com/attributions">CARTO</a>`,
+  },
+  { url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", attribution: OSM_ATTRIBUTION },
+];
+let providerIndex = 0;
+
+export function BaseTiles() {
+  const [index, setIndex] = useState(providerIndex);
+  const stats = useRef({ ok: 0, failed: 0 });
+  const provider = TILE_PROVIDERS[index];
+  return (
+    <TileLayer
+      key={index}
+      url={provider.url}
+      attribution={provider.attribution}
+      maxZoom={19}
+      eventHandlers={{
+        tileload: () => void stats.current.ok++,
+        tileerror: () => {
+          stats.current.failed++;
+          const { ok, failed } = stats.current;
+          if (failed >= 3 && failed > ok && index < TILE_PROVIDERS.length - 1) {
+            providerIndex = index + 1;
+            stats.current = { ok: 0, failed: 0 };
+            setIndex(providerIndex);
+          }
+        },
+      }}
+    />
+  );
+}
 
 const iconCache = new Map<string, L.DivIcon>();
 
@@ -165,7 +199,7 @@ export default function MapView({
       className="h-full w-full"
       attributionControl
     >
-      <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} maxZoom={19} />
+      <BaseTiles />
       {markers}
       {here && <Marker position={[here.lat, here.lng]} icon={hereIcon} interactive={false} />}
       <Controller

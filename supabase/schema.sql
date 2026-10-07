@@ -12,6 +12,14 @@ create table if not exists public.invites (
   invited_at timestamptz not null default now()
 );
 
+-- One-time join links. Only a hash is stored. No API role can read this table (RLS on, no policies);
+-- the /api/join route reads it with the service-role key.
+create table if not exists public.invite_tokens (
+  email      text primary key references public.invites (email) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null
+);
+
 create table if not exists public.profiles (
   id         uuid primary key references auth.users (id) on delete cascade,
   email      text not null unique,
@@ -74,6 +82,37 @@ language sql stable security definer set search_path = public as $$
   select exists (select 1 from invites where email = lower(auth.jwt() ->> 'email') and role = 'admin');
 $$;
 
+-- Issues a fresh 7-day join link token for an email (creating/updating its invite).
+-- Not callable from the app directly: run it in the SQL editor to bootstrap the first admin.
+create or replace function public.issue_invite_token(p_email text, p_role text default 'member') returns text
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  v_email text := lower(trim(p_email));
+  v_token text := encode(gen_random_bytes(24), 'hex');
+begin
+  if v_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then raise exception 'Invalid email'; end if;
+  if p_role not in ('member', 'admin') then raise exception 'Invalid role'; end if;
+  insert into invites (email, role) values (v_email, p_role)
+    on conflict (email) do update set role = excluded.role;
+  insert into invite_tokens (email, token_hash, expires_at)
+    values (v_email, encode(digest(v_token, 'sha256'), 'hex'), now() + interval '7 days')
+    on conflict (email) do update set token_hash = excluded.token_hash, expires_at = excluded.expires_at;
+  return v_token;
+end;
+$$;
+revoke execute on function public.issue_invite_token(text, text) from public, anon, authenticated;
+
+-- What the app calls: same thing, admins only. Also used to send a "reset password" link.
+create or replace function public.create_invite_link(p_email text, p_role text default 'member') returns text
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'Only admins can invite people'; end if;
+  return public.issue_invite_token(p_email, p_role);
+end;
+$$;
+revoke execute on function public.create_invite_link(text, text) from public, anon;
+grant execute on function public.create_invite_link(text, text) to authenticated;
+
 create or replace function public.touch_updated_at() returns trigger
 language plpgsql as $$
 begin
@@ -121,6 +160,7 @@ create trigger on_auth_user_created after insert on auth.users
 -- ─── Row Level Security ────────────────────────────────────────────────────
 
 alter table public.invites      enable row level security;
+alter table public.invite_tokens enable row level security;
 alter table public.profiles     enable row level security;
 alter table public.places       enable row level security;
 alter table public.place_status enable row level security;
@@ -203,5 +243,7 @@ begin
 end $$;
 
 -- ─── First admin ───────────────────────────────────────────────────────────
--- Replace with YOUR email, uncomment, run once. Invite everyone else from the app.
--- insert into public.invites (email, role) values ('you@example.com', 'admin');
+-- Run this once with YOUR email. It returns a token; open  <your app URL>/join#<token>
+-- (e.g. http://localhost:3000/join#abc123…) to set your password. Invite everyone else from the app.
+--
+--   select public.issue_invite_token('you@gmail.com', 'admin');

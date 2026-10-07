@@ -22,6 +22,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { auth, data, loadError, me, setEditor, toasts, repo, refresh } = useStore();
   const pathname = usePathname();
 
+  // The invite page must work before anyone is signed in.
+  if (pathname === "/join") return <>{children}</>;
   if (!auth) return <FullScreenLoader />;
   if (auth.kind === "signed-out") return <LoginScreen />;
   if (auth.kind === "not-invited") return <NotInvitedScreen email={auth.email} />;
